@@ -40,3 +40,15 @@ A starting point, not a rulebook. As you learn what your prototype needs --- a
 convention the work has to hold to, a sensor that keeps catching you out (a
 linter, say), a fact about the stack that is easy to get wrong --- write it down
 here and wire it into `check`. Growing this file is the work.
+
+## This week's stack: bare
+
+Hand-written HTML, CSS and JavaScript. No framework, and no TypeScript in the
+prototype source --- `main.js` is plain JS. Vite stays, because it is what
+builds `dist/`, and both the invariants and GitHub Pages read `dist/`, not the
+source. `tsconfig.json` now covers only `spec/` and `scripts/`.
+
+- New pages are `.html` files anywhere in the repo; `vite.config.ts` picks them
+  up as build entries automatically.
+- `spec/starter.test.ts` describes the starter page. Delete it once you have
+  replaced that page --- `spec/crit-4.test.ts` asserts the replacement.
