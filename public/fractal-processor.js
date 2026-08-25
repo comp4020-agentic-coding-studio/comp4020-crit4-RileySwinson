@@ -9,6 +9,20 @@
 // to infinity is a burst that stops. The fractal is doing the synthesis; we are
 // only listening to it.
 
+// The same seven families as main.js, in the same order. A worklet runs in its
+// own global scope and cannot import the module the page uses, so this list is
+// duplicated on purpose -- spec/crit-4.test.ts compares the two and fails if a
+// family is ever added to one and not the other.
+const FAMILY_IDS = [
+  "mandelbrot",
+  "burning-ship",
+  "tricorn",
+  "celtic",
+  "perpendicular",
+  "multibrot-3",
+  "multibrot-4",
+];
+
 const ESCAPE_SQ = 16; // |z| > 4 and the orbit is gone for good
 const SETTLED = 1e-9; // an orbit this still has converged to a point: silence
 const SETTLE_STEPS = 96;
@@ -23,6 +37,7 @@ class Voice {
   }
 
   reset() {
+    this.family = 0;
     this.zr = this.zi = 0;
     this.cr = this.ci = 0;
     this.prevR = this.prevI = 0;
@@ -49,6 +64,8 @@ class Voice {
   // set calls this every pointermove, which is what makes a drag a glissando
   // rather than a machine-gun of separate notes.
   seed(msg) {
+    const family = FAMILY_IDS.indexOf(msg.family);
+    this.family = family < 0 ? 0 : family;
     this.cr = msg.cr;
     this.ci = msg.ci;
     this.prevR = this.nextR = msg.zr;
@@ -67,11 +84,49 @@ class Voice {
     this.releasing = true;
   }
 
+  // One step of the selected family. Resolved to an integer once at noteOn, so
+  // the per-sample cost is a switch and not a string compare.
+  //
+  // Not called `step`: that name is already the phase increment this voice
+  // advances by each sample, and an instance field shadows a class method, so
+  // the call would throw on the audio thread where nothing on the page can see
+  // it -- the page keeps running and the note is simply silent.
+  applyFamily(x, y) {
+    switch (this.family) {
+      case 1: {
+        const ax = Math.abs(x);
+        const ay = Math.abs(y);
+        return [ax * ax - ay * ay, 2 * ax * ay];
+      }
+      case 2:
+        return [x * x - y * y, -2 * x * y];
+      case 3:
+        return [Math.abs(x * x - y * y), 2 * x * y];
+      case 4: {
+        const ay = Math.abs(y);
+        return [x * x - ay * ay, -2 * x * ay];
+      }
+      case 5: {
+        const x2 = x * x;
+        const y2 = y * y;
+        return [x * (x2 - 3 * y2), y * (3 * x2 - y2)];
+      }
+      case 6: {
+        const r = x * x - y * y;
+        const i = 2 * x * y;
+        return [r * r - i * i, 2 * r * i];
+      }
+      default:
+        return [x * x - y * y, 2 * x * y];
+    }
+  }
+
   advance() {
     this.prevR = this.nextR;
     this.prevI = this.nextI;
-    const r = this.nextR * this.nextR - this.nextI * this.nextI + this.cr;
-    const i = 2 * this.nextR * this.nextI + this.ci;
+    const [fr, fi] = this.applyFamily(this.nextR, this.nextI);
+    const r = fr + this.cr;
+    const i = fi + this.ci;
     if (!Number.isFinite(r) || !Number.isFinite(i) || r * r + i * i > ESCAPE_SQ) {
       // Escaped. Freeze the orbit and let the envelope close: the sound of a
       // point outside the set is the chaos just before it left, then nothing.

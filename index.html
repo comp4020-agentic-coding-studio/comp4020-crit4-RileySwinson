@@ -33,19 +33,19 @@
 
     <main>
       <div class="stage">
-        <section class="panel" aria-labelledby="mandelbrot-heading">
-          <h2 id="mandelbrot-heading">Mandelbrot</h2>
-          <p class="panel-note">
+        <section class="panel" aria-labelledby="parameter-heading">
+          <h2 id="parameter-heading">Mandelbrot</h2>
+          <p class="panel-note" id="family-blurb">
             Clicking picks <em>c</em> — it plays that point and rebuilds the
             Julia set beside it.
           </p>
-          <div class="plot" data-view="mandelbrot">
+          <div class="plot" data-view="parameter">
             <canvas class="fractal" aria-hidden="true"></canvas>
             <canvas
               class="overlay"
               tabindex="0"
               role="application"
-              aria-label="Mandelbrot set. Click or drag to play a point. Arrow keys move the point, letter keys play notes."
+              aria-label="Parameter plane. Click or drag to play a point. Arrow keys move the point, letter keys play notes."
             ></canvas>
           </div>
         </section>
@@ -70,6 +70,23 @@
 
       <section class="controls" aria-labelledby="controls-heading">
         <h2 id="controls-heading" class="visually-hidden">Controls</h2>
+
+        <div class="control">
+          <label for="family">Fractal</label>
+          <select id="family">
+            <option value="mandelbrot">Mandelbrot — z² + c</option>
+            <option value="burning-ship">Burning Ship — (|x| + i|y|)² + c</option>
+            <option value="tricorn">Tricorn — conj(z)² + c</option>
+            <option value="celtic">Celtic — |Re z²| + i·Im z² + c</option>
+            <option value="perpendicular">Perpendicular — (x − i|y|)² + c</option>
+            <option value="multibrot-3">Multibrot — z³ + c</option>
+            <option value="multibrot-4">Multibrot — z⁴ + c</option>
+          </select>
+          <p class="hint">
+            Each one bends the orbit differently, so each one has its own voice.
+            Switching resets the view and picks a <em>c</em> worth hearing.
+          </p>
+        </div>
 
         <div class="control">
           <label for="rate">Step rate</label>
@@ -150,6 +167,8 @@
           <dd>Nudge the current point. Hold <kbd>Shift</kbd> for finer steps.</dd>
           <dt>Scroll, or <kbd>Shift</kbd>-drag</dt>
           <dd>Zoom, and pan.</dd>
+          <dt>Fractal menu</dt>
+          <dd>Seven families, each with its own Julia panel and its own sound.</dd>
           <dt>Space</dt>
           <dd>Jump to a random point worth hearing.</dd>
         </dl>

@@ -104,6 +104,55 @@ describe("playable with whatever is at hand", () => {
   });
 });
 
+describe("the menu offers exactly what the synth can play", () => {
+  // The families are declared twice -- once in the page, once in the worklet,
+  // which is a separate global scope and cannot import the page's module. That
+  // duplication is deliberate and this is the check that keeps it honest: add a
+  // fractal to one list and forget the other, and the dropdown offers a sound
+  // the synth will silently render as a Mandelbrot.
+  const worklet = readFileSync(join(DIST, "fractal-processor.js"), "utf8");
+  const declared = /const FAMILY_IDS = \[([^\]]*)\]/.exec(worklet);
+
+  it("declares its families in the worklet", () => {
+    expect(declared, "no FAMILY_IDS list in the shipped worklet").not.toBeNull();
+  });
+
+  const ids = (declared?.[1].match(/["'`][a-z0-9-]+["'`]/g) ?? []).map((q) =>
+    q.slice(1, -1),
+  );
+
+  it("offers more than one", () => {
+    expect(ids.length).toBeGreaterThan(1);
+  });
+
+  for (const id of ids) {
+    it(`ships "${id}" in the page as well as the worklet`, () => {
+      expect(
+        scripts.includes(id),
+        `the worklet can play "${id}" but the page never names it`,
+      ).toBe(true);
+    });
+
+    it(`offers "${id}" in the menu`, () => {
+      const option = home.querySelector(`#family option[value="${id}"]`);
+      expect(
+        option !== null,
+        `the synth can play "${id}" but nothing in the menu selects it`,
+      ).toBe(true);
+    });
+  }
+
+  it("offers nothing the synth cannot play", () => {
+    const offered = [...home.querySelectorAll("#family option")].map((o) =>
+      o.getAttribute("value"),
+    );
+    expect(offered.length).toBeGreaterThan(0);
+    for (const value of offered) {
+      expect(ids.includes(value ?? ""), `the menu offers "${value}", which the synth does not know`).toBe(true);
+    }
+  });
+});
+
 describe("a stranger can play it uninstructed", () => {
   it("invites the first sound on the opening screen", () => {
     const main = home.querySelector("main")?.textContent ?? "";

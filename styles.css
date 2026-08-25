@@ -162,6 +162,21 @@ h2 {
   margin: 0;
 }
 
+.control select {
+  width: 100%;
+  background: #070910;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 0.4rem;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.control select:hover {
+  border-color: var(--accent);
+}
+
 .c-inputs input {
   width: 100%;
   min-width: 0;

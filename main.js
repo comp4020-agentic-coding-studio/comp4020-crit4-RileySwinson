@@ -5,10 +5,67 @@
 // the starting z. Clicking either one hands its orbit to the audio worklet,
 // which walks that orbit and reads it out as a stereo waveform.
 
-const DEFAULTS = {
-  mandelbrot: { cx: -0.6, cy: 0, span: 3.2 },
-  julia: { cx: 0, cy: 0, span: 3.2 },
-};
+// The seven families. Every one of them is z -> f(z) + c for some f, which is
+// what lets one code path draw all of them and one synth play all of them: the
+// parameter plane varies c from z = 0, the Julia plane fixes c and varies z.
+//
+// `step` is the integer the switch in applyFamily uses. That ordering is
+// duplicated in public/fractal-processor.js, because a worklet is a separate
+// global scope and cannot share this module -- spec/crit-4.test.ts fails if the
+// two lists ever drift apart.
+const FAMILIES = [
+  {
+    id: "mandelbrot",
+    label: "Mandelbrot",
+    power: 2,
+    view: { cx: -0.6, cy: 0, span: 3.2 },
+    c: { re: -0.1226, im: 0.7449 },
+  },
+  {
+    id: "burning-ship",
+    label: "Burning Ship",
+    power: 2,
+    view: { cx: -0.5, cy: -0.5, span: 3.4 },
+    c: { re: -1.755, im: -0.03 },
+  },
+  {
+    id: "tricorn",
+    label: "Tricorn",
+    power: 2,
+    view: { cx: 0, cy: 0, span: 3.6 },
+    c: { re: -0.2, im: 0.7 },
+  },
+  {
+    id: "celtic",
+    label: "Celtic",
+    power: 2,
+    view: { cx: -0.6, cy: 0, span: 3.4 },
+    c: { re: -0.62, im: 0.42 },
+  },
+  {
+    id: "perpendicular",
+    label: "Perpendicular",
+    power: 2,
+    view: { cx: -0.5, cy: 0, span: 3.4 },
+    c: { re: -0.72, im: 0.28 },
+  },
+  {
+    id: "multibrot-3",
+    label: "Multibrot (cubic)",
+    power: 3,
+    view: { cx: 0, cy: 0, span: 3 },
+    c: { re: 0.4, im: 0.35 },
+  },
+  {
+    id: "multibrot-4",
+    label: "Multibrot (quartic)",
+    power: 4,
+    view: { cx: 0, cy: 0, span: 3 },
+    c: { re: 0.6, im: 0.35 },
+  },
+];
+
+const JULIA_VIEW = { cx: 0, cy: 0, span: 3.4 };
 
 const ORBIT_POINTS = 900;
 const ESCAPE_SQ = 16;
@@ -16,12 +73,13 @@ const MAX_RENDER = 700;
 const SETTLE_MS = 200; // quiet time before the full-resolution redraw
 
 const state = {
+  family: 0,
   julia: { re: -0.1226, im: 0.7449 },
   linkJulia: true,
   rate: 2400,
   volume: 0.35,
   maxIter: 220,
-  point: { panel: "mandelbrot", re: -0.1226, im: 0.7449 },
+  point: { panel: "parameter", re: -0.1226, im: 0.7449 },
 };
 
 // ---------------------------------------------------------------- palette
@@ -57,9 +115,68 @@ const PALETTE = (() => {
 
 // ---------------------------------------------------------------- fractals
 
-// Cheap containment tests for the two largest interior regions. Interior points
-// cost the full iteration budget, and these two are most of the black on
-// screen, so skipping them is the difference between a snappy pan and a stutter.
+// One step of whichever family is selected, before c is added. Results come
+// back in module scratch rather than a fresh array: this runs tens of millions
+// of times per full-resolution frame, and allocating per iteration is the
+// difference between a snappy pan and a stutter.
+let SR = 0;
+let SI = 0;
+
+function applyFamily(step, x, y) {
+  switch (step) {
+    case 1: {
+      // Burning Ship: fold the point into the positive quadrant first. The
+      // fold is what gives it the flat keel and the masts.
+      const ax = Math.abs(x);
+      const ay = Math.abs(y);
+      SR = ax * ax - ay * ay;
+      SI = 2 * ax * ay;
+      break;
+    }
+    case 2:
+      // Tricorn: conj(z)^2. Flipping the sign of the imaginary part each step
+      // is what makes it three-cornered instead of round.
+      SR = x * x - y * y;
+      SI = -2 * x * y;
+      break;
+    case 3:
+      // Celtic: fold only the real part of z^2.
+      SR = Math.abs(x * x - y * y);
+      SI = 2 * x * y;
+      break;
+    case 4: {
+      // Perpendicular: (x - i|y|)^2.
+      const ay = Math.abs(y);
+      SR = x * x - ay * ay;
+      SI = -2 * x * ay;
+      break;
+    }
+    case 5: {
+      // z^3
+      const x2 = x * x;
+      const y2 = y * y;
+      SR = x * (x2 - 3 * y2);
+      SI = y * (3 * x2 - y2);
+      break;
+    }
+    case 6: {
+      // z^4, as (z^2)^2
+      const r = x * x - y * y;
+      const i = 2 * x * y;
+      SR = r * r - i * i;
+      SI = 2 * r * i;
+      break;
+    }
+    default:
+      SR = x * x - y * y;
+      SI = 2 * x * y;
+  }
+}
+
+// Cheap containment tests for the two largest interior regions of the
+// Mandelbrot. Interior points cost the full iteration budget, and these two are
+// most of the black on screen. Only valid for family 0; the others get no such
+// shortcut and are correspondingly slower to draw.
 function inMainBody(cr, ci) {
   const q = (cr - 0.25) * (cr - 0.25) + ci * ci;
   if (q * (q + (cr - 0.25)) <= 0.25 * ci * ci) return true;
@@ -67,24 +184,26 @@ function inMainBody(cr, ci) {
 }
 
 // Escape time with the fractional part filled in, so the bands are smooth
-// rather than stepped. Returns -1 for a point that never escaped.
-function escapeTime(zr, zi, cr, ci, maxIter) {
-  let r2 = zr * zr;
-  let i2 = zi * zi;
+// rather than stepped. Returns -1 for a point that never escaped. The log base
+// is the family's power, not 2 -- get that wrong and the cubic and quartic
+// bands visibly stagger.
+function escapeTime(zr, zi, cr, ci, maxIter, step, logPower) {
   let n = 0;
-  while (n < maxIter && r2 + i2 <= 256) {
-    zi = 2 * zr * zi + ci;
-    zr = r2 - i2 + cr;
-    r2 = zr * zr;
-    i2 = zi * zi;
+  while (n < maxIter && zr * zr + zi * zi <= 256) {
+    applyFamily(step, zr, zi);
+    zr = SR + cr;
+    zi = SI + ci;
     n++;
   }
   if (n >= maxIter) return -1;
-  return n + 1 - Math.log(Math.log(Math.sqrt(r2 + i2))) / Math.LN2;
+  return n + 1 - Math.log(Math.log(Math.sqrt(zr * zr + zi * zi))) / logPower;
 }
 
 function renderFractal(panel, size) {
   const { canvas, view, kind } = panel;
+  const family = FAMILIES[state.family];
+  const fstep = state.family;
+  const logPower = Math.log(family.power);
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext("2d");
@@ -94,7 +213,8 @@ function renderFractal(panel, size) {
   const step = view.span / size;
   const left = view.cx - view.span / 2;
   const top = view.cy + view.span / 2;
-  const isMandelbrot = kind === "mandelbrot";
+  const isParameter = kind === "parameter";
+  const shortcut = isParameter && fstep === 0;
   const jr = state.julia.re;
   const ji = state.julia.im;
 
@@ -103,10 +223,13 @@ function renderFractal(panel, size) {
     for (let x = 0; x < size; x++) {
       const re = left + (x + 0.5) * step;
       let value;
-      if (isMandelbrot) {
-        value = inMainBody(re, im) ? -1 : escapeTime(0, 0, re, im, maxIter);
+      if (isParameter) {
+        value =
+          shortcut && inMainBody(re, im)
+            ? -1
+            : escapeTime(0, 0, re, im, maxIter, fstep, logPower);
       } else {
-        value = escapeTime(re, im, jr, ji, maxIter);
+        value = escapeTime(re, im, jr, ji, maxIter, fstep, logPower);
       }
 
       const o = (y * size + x) * 4;
@@ -130,9 +253,12 @@ function renderFractal(panel, size) {
 // ---------------------------------------------------------------- orbits
 
 function orbitSeed(kind, point) {
-  return kind === "mandelbrot"
-    ? { cr: point.re, ci: point.im, zr: 0, zi: 0 }
-    : { cr: state.julia.re, ci: state.julia.im, zr: point.re, zi: point.im };
+  const seed =
+    kind === "parameter"
+      ? { cr: point.re, ci: point.im, zr: 0, zi: 0 }
+      : { cr: state.julia.re, ci: state.julia.im, zr: point.re, zi: point.im };
+  seed.family = FAMILIES[state.family].id;
+  return seed;
 }
 
 // The same walk the worklet does, run once for the drawing. Stopping at the
@@ -140,12 +266,14 @@ function orbitSeed(kind, point) {
 // inside draws a closed loop.
 function computeOrbit(kind, point) {
   const seed = orbitSeed(kind, point);
+  const fstep = state.family;
   let zr = seed.zr;
   let zi = seed.zi;
   const path = [zr, zi];
   for (let n = 1; n < ORBIT_POINTS; n++) {
-    const r = zr * zr - zi * zi + seed.cr;
-    const i = 2 * zr * zi + seed.ci;
+    applyFamily(fstep, zr, zi);
+    const r = SR + seed.cr;
+    const i = SI + seed.ci;
     if (!Number.isFinite(r) || !Number.isFinite(i) || r * r + i * i > ESCAPE_SQ) {
       break;
     }
@@ -259,7 +387,7 @@ function makePanel(kind) {
     plot,
     canvas: plot.querySelector(".fractal"),
     overlay: plot.querySelector(".overlay"),
-    view: { ...DEFAULTS[kind] },
+    view: { ...(kind === "parameter" ? FAMILIES[state.family].view : JULIA_VIEW) },
     orbit: null,
     orbitRate: 0,
     playhead: 0,
@@ -294,7 +422,7 @@ function showOrbit(panel, point, rate) {
   panel.orbitRate = rate;
   panel.playhead = 0;
   panel.sounding = true;
-  if (panel.kind === "mandelbrot" && state.linkJulia) setJulia(point, true);
+  if (panel.kind === "parameter" && state.linkJulia) setJulia(point, true);
 }
 
 function drawOverlay(panel) {
@@ -308,7 +436,7 @@ function drawOverlay(panel) {
   context.clearRect(0, 0, size, size);
 
   // Where c sits, so the two panels read as one picture.
-  if (panel.kind === "mandelbrot") {
+  if (panel.kind === "parameter") {
     const [x, y] = toPixels(panel, state.julia.re, state.julia.im, size);
     context.strokeStyle = "rgba(255,255,255,0.85)";
     context.lineWidth = 1.5;
@@ -504,19 +632,21 @@ function bindKeyboard() {
 // silence, far outside escapes before it can sound. So keep drawing until we
 // land on something that took a while to make up its mind.
 function randomPoint() {
-  const panel = panels.mandelbrot;
+  const panel = panels.parameter;
   const { view } = panel;
+  const fstep = state.family;
+  const logPower = Math.log(FAMILIES[fstep].power);
   let best = null;
   for (let tries = 0; tries < 500; tries++) {
     const re = view.cx + (Math.random() - 0.5) * view.span * 0.9;
     const im = view.cy + (Math.random() - 0.5) * view.span * 0.9;
-    const value = inMainBody(re, im) ? -1 : escapeTime(0, 0, re, im, state.maxIter);
+    const value = escapeTime(0, 0, re, im, state.maxIter, fstep, logPower);
     const score = value < 0 ? 0 : value;
     if (!best || score > best.score) best = { re, im, score };
     if (score > state.maxIter * 0.35) break;
   }
   const point = { re: best.re, im: best.im };
-  noteOn("random", "mandelbrot", point);
+  noteOn("random", "parameter", point);
   window.setTimeout(() => noteOff("random"), 900);
 }
 
@@ -531,6 +661,7 @@ const $ = (id) => document.getElementById(id);
 const rateInput = $("rate");
 const volumeInput = $("volume");
 const detailInput = $("detail");
+const familySelect = $("family");
 const cRe = $("c-re");
 const cIm = $("c-im");
 const statusLine = $("status");
@@ -539,7 +670,31 @@ function setStatus(text) {
   statusLine.textContent = text;
 }
 
+// Switching family resets both views and takes that family's own c. A c that
+// suited the Mandelbrot usually leaves the Burning Ship's Julia set as empty
+// dust, and a blank panel reads as a broken page rather than a deliberate one.
+function setFamily(index) {
+  panic();
+  state.family = index;
+  const family = FAMILIES[index];
+  panels.parameter.view = { ...family.view };
+  panels.julia.view = { ...JULIA_VIEW };
+  state.julia = { ...family.c };
+  cRe.value = family.c.re;
+  cIm.value = family.c.im;
+  state.point = { panel: "parameter", ...family.c };
+  document.getElementById("parameter-heading").textContent = family.label;
+  showOrbit(panels.parameter, currentPoint(), state.rate);
+  panels.parameter.sounding = false;
+  for (const panel of Object.values(panels)) requestRender(panel, false);
+}
+
 function bindControls() {
+  familySelect.addEventListener("change", () => {
+    const index = FAMILIES.findIndex((f) => f.id === familySelect.value);
+    setFamily(index < 0 ? 0 : index);
+  });
+
   rateInput.addEventListener("input", () => {
     state.rate = Math.round(Math.pow(2, Number(rateInput.value)));
     $("rate-out").textContent = `${state.rate} steps/s`;
@@ -616,7 +771,7 @@ function frame(now) {
 // ---------------------------------------------------------------- start
 
 function start() {
-  makePanel("mandelbrot");
+  makePanel("parameter");
   makePanel("julia");
   for (const panel of Object.values(panels)) bindPanel(panel);
   bindKeyboard();
@@ -624,8 +779,8 @@ function start() {
 
   state.rate = Math.round(Math.pow(2, Number(rateInput.value)));
   $("rate-out").textContent = `${state.rate} steps/s`;
-  showOrbit(panels.mandelbrot, currentPoint(), state.rate);
-  panels.mandelbrot.sounding = false;
+  showOrbit(panels.parameter, currentPoint(), state.rate);
+  panels.parameter.sounding = false;
 
   const resize = new ResizeObserver(() => {
     for (const panel of Object.values(panels)) requestRender(panel, true);

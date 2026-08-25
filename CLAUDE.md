@@ -52,3 +52,25 @@ source. `tsconfig.json` now covers only `spec/` and `scripts/`.
   up as build entries automatically.
 - `spec/starter.test.ts` describes the starter page. Delete it once you have
   replaced that page --- `spec/crit-4.test.ts` asserts the replacement.
+
+## The audio thread is silent about its own errors
+
+A `TypeError` inside an `AudioWorkletProcessor` does not reach `window.onerror`,
+the console, or any test. The page keeps running and the note is simply silent,
+which looks exactly like a design problem and is not one. Two rules follow:
+
+- Never give a `Voice` method the same name as one of its fields. An instance
+  field shadows the class method, so the call throws on the audio thread where
+  nothing can see it. This cost real time once already: `step()` the method
+  against `this.step` the phase increment.
+- A green `pnpm check` is not evidence of sound. The spec tests read the shipped
+  JavaScript; they cannot listen to it. Before believing the synth works, render
+  it through an `OfflineAudioContext` in a real browser and measure the output —
+  a period-p orbit must come back at rate ÷ p.
+
+## The family table is written twice
+
+`FAMILIES` in `main.js` and `FAMILY_IDS` in `public/fractal-processor.js` must
+stay in the same order. A worklet is a separate global scope and cannot import
+the page's module, so the duplication is deliberate; `spec/crit-4.test.ts` is
+what stops it drifting. Add a fractal to one list and the test fails.
