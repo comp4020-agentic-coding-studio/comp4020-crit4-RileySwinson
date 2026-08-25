@@ -3,36 +3,169 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>COMP4020 prototype</title>
+    <title>Orbit — a Mandelbrot and Julia instrument</title>
     <meta
       name="description"
-      content="Replace this with one sentence saying what this page is. A search result and a link preview both show it."
+      content="Play the Mandelbrot and Julia sets. Click a point and hear the orbit of z squared plus c as sound: short cycles ring high, long ones low, escaping points burst and stop."
     />
 
-    <!--
-      The link-preview card: public/card.png, 1200x630 --- replace it. The URL
-      resolves against this page, like any link. No og:title/og:description:
-      scrapers fall back to the <title> and description above.
-    -->
     <meta property="og:type" content="website" />
     <meta property="og:image" content="./card.png" />
     <meta name="twitter:card" content="summary_large_image" />
 
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23070a12'/%3E%3Cpath d='M6 16h20M16 6v20' stroke='%231e2432'/%3E%3Cpath d='M11 9 L23 20 L13 22 Z' fill='none' stroke='%23ffd48a' stroke-width='1.5'/%3E%3Ccircle cx='11' cy='9' r='2.5' fill='%2378f0ff'/%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <header>
       <nav aria-label="Primary">
-        <a href="./">Home</a>
+        <a href="./">Orbit</a>
       </nav>
-    </header>
-    <main>
-      <h1>COMP4020 prototype</h1>
-      <p data-testid="intro">
-        Replace this with your prototype. This week's brief is on the course website;
-        <code>spec/README.md</code> explains how the checks in this repo relate to it.
+      <h1>Orbit</h1>
+      <p class="invitation">
+        Click and drag anywhere on either fractal to play it. Every point sounds
+        different.
       </p>
+    </header>
+
+    <main>
+      <div class="stage">
+        <section class="panel" aria-labelledby="mandelbrot-heading">
+          <h2 id="mandelbrot-heading">Mandelbrot</h2>
+          <p class="panel-note">
+            Clicking picks <em>c</em> — it plays that point and rebuilds the
+            Julia set beside it.
+          </p>
+          <div class="plot" data-view="mandelbrot">
+            <canvas class="fractal" aria-hidden="true"></canvas>
+            <canvas
+              class="overlay"
+              tabindex="0"
+              role="application"
+              aria-label="Mandelbrot set. Click or drag to play a point. Arrow keys move the point, letter keys play notes."
+            ></canvas>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="julia-heading">
+          <h2 id="julia-heading">Julia</h2>
+          <p class="panel-note">
+            The Julia set for that <em>c</em>. Clicking picks where the orbit
+            starts.
+          </p>
+          <div class="plot" data-view="julia">
+            <canvas class="fractal" aria-hidden="true"></canvas>
+            <canvas
+              class="overlay"
+              tabindex="0"
+              role="application"
+              aria-label="Julia set. Click or drag to play a point. Arrow keys move the point, letter keys play notes."
+            ></canvas>
+          </div>
+        </section>
+      </div>
+
+      <section class="controls" aria-labelledby="controls-heading">
+        <h2 id="controls-heading" class="visually-hidden">Controls</h2>
+
+        <div class="control">
+          <label for="rate">Step rate</label>
+          <input
+            type="range"
+            id="rate"
+            min="5.6"
+            max="13.3"
+            step="0.01"
+            value="11.2"
+          />
+          <output id="rate-out">2400 steps/s</output>
+          <p class="hint">
+            How fast the orbit is walked. This sets the pitch: a p-step cycle
+            sounds at rate ÷ p.
+          </p>
+        </div>
+
+        <div class="control">
+          <label for="volume">Volume</label>
+          <input
+            type="range"
+            id="volume"
+            min="0"
+            max="1"
+            step="0.01"
+            value="0.35"
+          />
+          <output id="volume-out">35%</output>
+        </div>
+
+        <div class="control">
+          <label for="detail">Detail</label>
+          <input
+            type="range"
+            id="detail"
+            min="64"
+            max="600"
+            step="8"
+            value="220"
+          />
+          <output id="detail-out">220 iterations</output>
+          <p class="hint">Iterations used to draw. Higher is sharper, slower.</p>
+        </div>
+
+        <div class="control control-c">
+          <span class="label">Julia constant</span>
+          <div class="c-inputs">
+            <label for="c-re">re</label>
+            <input type="number" id="c-re" step="0.001" value="-0.1226" />
+            <label for="c-im">im</label>
+            <input type="number" id="c-im" step="0.001" value="0.7449" />
+          </div>
+          <label class="checkbox">
+            <input type="checkbox" id="link-julia" checked />
+            Follow the Mandelbrot
+          </label>
+        </div>
+
+        <div class="control buttons">
+          <button type="button" id="random">Random point</button>
+          <button type="button" id="reset-view">Reset view</button>
+          <button type="button" id="panic">Silence</button>
+        </div>
+      </section>
+
+      <section class="legend" aria-labelledby="legend-heading">
+        <h2 id="legend-heading">Playing it</h2>
+        <dl>
+          <dt>Click or drag</dt>
+          <dd>Plays the orbit under the pointer. Dragging bends the note.</dd>
+          <dt>Letter keys</dt>
+          <dd>
+            <kbd>Z</kbd>–<kbd>M</kbd> and <kbd>Q</kbd>–<kbd>P</kbd> play the
+            current point at different pitches, two rows like a keyboard.
+          </dd>
+          <dt>Arrow keys</dt>
+          <dd>Nudge the current point. Hold <kbd>Shift</kbd> for finer steps.</dd>
+          <dt>Scroll, or <kbd>Shift</kbd>-drag</dt>
+          <dd>Zoom, and pan.</dd>
+          <dt>Space</dt>
+          <dd>Jump to a random point worth hearing.</dd>
+        </dl>
+        <p class="status" id="status" role="status">
+          Audio starts on your first click.
+        </p>
+      </section>
     </main>
+
+    <footer>
+      <p>
+        Every sound here is the sequence <em>z</em> → <em>z</em>² + <em>c</em>,
+        read as a waveform. COMP4020 crit 4.
+      </p>
+    </footer>
+
     <script type="module" src="./main.js"></script>
   </body>
 </html>

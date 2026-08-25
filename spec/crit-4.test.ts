@@ -48,11 +48,14 @@ describe("the browser is the instrument", () => {
   });
 
   it("routes what it makes through the graph, rather than just starting a context", () => {
+    // Any node that generates samples counts: an oscillator, a buffer source,
+    // or a worklet doing the arithmetic itself. What the spec rules out is a
+    // page that opens a context and then plays something it was handed.
     expect(
-      /OscillatorNode|createOscillator|AudioBufferSourceNode|createBufferSource/.test(
+      /OscillatorNode|createOscillator|AudioBufferSourceNode|createBufferSource|AudioWorkletNode/.test(
         scripts,
       ),
-      "no source node in the shipped JavaScript — something has to actually make the sound",
+      "no node making samples in the shipped JavaScript — something has to actually make the sound",
     ).toBe(true);
   });
 
@@ -71,10 +74,12 @@ describe("the browser is the instrument", () => {
   });
 });
 
+// The quote classes below allow a backtick: the bundler rewrites string
+// literals as template literals, so `"keydown"` ships as `` `keydown` ``.
 describe("playable with whatever is at hand", () => {
   it("listens for pointer or mouse or touch", () => {
     expect(
-      /["'](pointer(down|move|up)|mouse(down|move|up)|touch(start|move|end))["']/.test(
+      /["'`](pointer(down|move|up)|mouse(down|move|up)|touch(start|move|end))["'`]/.test(
         scripts,
       ),
       "no pointer, mouse or touch listener in the shipped JavaScript",
@@ -83,7 +88,7 @@ describe("playable with whatever is at hand", () => {
 
   it("listens for the keyboard", () => {
     expect(
-      /["'](keydown|keyup|keypress)["']/.test(scripts),
+      /["'`](keydown|keyup|keypress)["'`]/.test(scripts),
       "no keyboard listener in the shipped JavaScript — a keyboard is what some players have at hand",
     ).toBe(true);
   });
